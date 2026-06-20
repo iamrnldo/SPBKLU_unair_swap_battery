@@ -1,0 +1,22 @@
+{
+  "appId": "com.spbklu.userapp",
+  "appName": "SPBKLU Mobile",
+  "webDir": "dist",
+  "bundledWebRuntime": false,
+  "server": {
+    "androidScheme": "http",
+    "allowNavigation": [
+      "192.168.1.154"
+    ]
+  },
+  "plugins": {
+    "GoogleAuth": {
+      "providers": [
+        "google"
+      ],
+      "clientId": "58586788358-f5b1ig0vnnmp34mudo6j6ftrcmr00n0k.apps.googleusercontent.com",
+      "androidClientId": "58586788358-e9evtelc8nh5b3lti4jq344d0ev9mvdo.apps.googleusercontent.com",
+      "forceCodeForRefreshToken": true
+    }
+  }
+}

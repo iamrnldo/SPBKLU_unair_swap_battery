@@ -1,0 +1,37 @@
+{
+  "name": "spbklu-user-apk",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite",
+    "fix:manifest": "node fix-manifest.cjs && node fix-strings.cjs && node clean-main-activity.cjs",
+    "cap:sync": "npm run build && npx cap sync android",
+    "build:debug": "npm run build && npx cap sync android && npx cap run android --target=emulator",
+    "build:apk:debug": "npm run build && npx cap sync android && node fix-manifest.cjs && node fix-strings.cjs && node clean-main-activity.cjs && cd android && chmod +x ./gradlew && ./gradlew clean && ./gradlew assembleDebug",
+    "build:apk:release": "npm run build && npx cap sync android && node fix-manifest.cjs && node fix-strings.cjs && node clean-main-activity.cjs && cd android && chmod +x ./gradlew && ./gradlew clean && ./gradlew assembleRelease",
+    "rebuild:android": "rm -rf android && npm run build && npx cap add android && node fix-manifest.cjs && node fix-strings.cjs && node clean-main-activity.cjs && cd android && chmod +x ./gradlew && ./gradlew assembleDebug"
+  },
+  "dependencies": {
+    "@capacitor/core": "^6.1.0",
+    "@codetrix-studio/capacitor-google-auth": "3.4.0-rc.4",
+    "axios": "^1.7.2",
+    "lucide-react": "^0.379.0",
+    "qr-scanner": "^1.4.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.23.1"
+  },
+  "devDependencies": {
+    "@capacitor/android": "^6.1.0",
+    "@capacitor/cli": "^6.1.0",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "autoprefixer": "^10.4.19",
+    "postcss": "^8.4.38",
+    "tailwindcss": "^3.4.3",
+    "vite": "^5.2.11"
+  }
+}
