@@ -1,8 +1,6 @@
 /* Custom app global styles */
 
-/* Leaflet + Tailwind compatibility fixes.
-   Tailwind's preflight styles can interfere with Leaflet tile image sizing in
-   some builds/browsers, causing the map area to appear blank/grey. */
+/* Leaflet + Tailwind compatibility fixes */
 .leaflet-container {
   width: 100%;
   height: 100%;

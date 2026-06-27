@@ -88,7 +88,7 @@ const Dashboard = () => {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-black text-slate-800 tracking-tight">Ikhtisar Real-Time</h1>
-          <p className="text-sm font-medium text-slate-500">Pantau status stasiun, titik kabel charger, dan performa keuangan SPBKLU Anda.</p>
+          <p className="text-sm font-medium text-slate-500">Pantau status stasiun, inventori baterai, dan performa pemesanan swap baterai.</p>
         </div>
         <button 
           onClick={handleRefresh}
@@ -111,7 +111,7 @@ const Dashboard = () => {
           color="blue"
         />
         <Card 
-          title="Stasiun Charging" 
+          title="Stasiun Swap" 
           value={`${statistics.totalStations} Unit`} 
           icon={MapPin} 
           description="Terpasang di DKI Jakarta" 
@@ -119,10 +119,10 @@ const Dashboard = () => {
           color="orange"
         />
         <Card 
-          title="Kabel Charger" 
+          title="Populasi Baterai" 
           value={`${statistics.totalBatteries} Unit`} 
           icon={Battery} 
-          description="Titik scan QR aktif" 
+          description="Baterai siap & siklus swap" 
           trend="Sehat" 
           color="purple"
         />
@@ -130,7 +130,7 @@ const Dashboard = () => {
           title="Omset Bulan Ini" 
           value={formatRupiah(statistics.revenueThisMonth)} 
           icon={DollarSign} 
-          description="Pendapatan charging" 
+          description="Pendapatan order swap" 
           trend="+32.4%" 
           color="emerald"
         />
@@ -144,7 +144,7 @@ const Dashboard = () => {
           <div className="flex items-center justify-between mb-6">
             <div>
               <h4 className="text-base font-black text-slate-800 tracking-tight">Tren Pendapatan Bulanan</h4>
-              <p className="text-xs font-semibold text-slate-400">Total akumulasi biaya charging kendaraan (Rupiah)</p>
+              <p className="text-xs font-semibold text-slate-400">Total akumulasi pembayaran order swap baterai (Rupiah)</p>
             </div>
             <div className="bg-emerald-50 text-emerald-600 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1">
               <TrendingUp className="h-3 w-3" /> 2026 Target
@@ -176,8 +176,8 @@ const Dashboard = () => {
         {/* Transaction Volume Chart (1/3 width) */}
         <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
           <div className="mb-6">
-            <h4 className="text-base font-black text-slate-800 tracking-tight">Volume Charging</h4>
-            <p className="text-xs font-semibold text-slate-400">Jumlah transaksi charging per bulan</p>
+            <h4 className="text-base font-black text-slate-800 tracking-tight">Volume Swap</h4>
+            <p className="text-xs font-semibold text-slate-400">Jumlah pesanan swap per bulan</p>
           </div>
 
           <div className="h-80 w-full">

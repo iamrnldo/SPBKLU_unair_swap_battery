@@ -16,37 +16,7 @@ const getProfile = async (req, res, next) => {
       id: user.id,
       name: user.name,
       email: user.email,
-      role: user.role,
-      balance: user.balance
-    });
-  } catch (error) {
-    next(error);
-  }
-};
-
-/**
- * Top up user balance/saldo
- */
-const topUpBalance = async (req, res, next) => {
-  try {
-    const { amount } = req.body;
-    if (!amount || amount <= 0) {
-      return sendError(res, 'Invalid top-up amount', 400);
-    }
-
-    const user = await User.findByPk(req.user.id);
-    if (!user) {
-      return sendError(res, 'User not found', 404);
-    }
-
-    // Increment balance
-    user.balance += parseInt(amount);
-    await user.save();
-
-    return sendSuccess(res, 'Balance topped up successfully', {
-      userId: user.id,
-      name: user.name,
-      newBalance: user.balance
+      role: user.role
     });
   } catch (error) {
     next(error);
@@ -69,6 +39,5 @@ const getMyBattery = async (req, res, next) => {
 
 module.exports = {
   getProfile,
-  topUpBalance,
   getMyBattery
 };

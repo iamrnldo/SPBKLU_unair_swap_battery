@@ -7,7 +7,7 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // Function to refresh user's state (profile & wallet balance) from backend
+  // Function to refresh user's profile state from backend
   const refreshProfile = async () => {
     try {
       const response = await api.get('/users/profile');
@@ -25,7 +25,7 @@ export const AuthProvider = ({ children }) => {
 
     if (storedUser && storedToken) {
       setUser(JSON.parse(storedUser));
-      // Async fetch latest data in background to ensure up-to-date wallet balance
+      // Async fetch latest profile data in background
       refreshProfile();
     }
     setLoading(false);
@@ -99,7 +99,7 @@ export const AuthProvider = ({ children }) => {
     setUser(null);
     localStorage.removeItem('spbklu_user_token');
     localStorage.removeItem('spbklu_user_data');
-    localStorage.removeItem('spbklu_active_charging_session');
+    localStorage.removeItem('spbklu_active_swap_order');
   };
 
   return (

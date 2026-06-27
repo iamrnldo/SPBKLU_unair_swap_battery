@@ -30,8 +30,7 @@ const registerUser = async (req, res, next) => {
       name,
       email,
       password: hashedPassword,
-      role: 'user',
-      balance: 0
+      role: 'user'
     });
 
     // Generate JWT token
@@ -46,8 +45,7 @@ const registerUser = async (req, res, next) => {
         id: newUser.id,
         name: newUser.name,
         email: newUser.email,
-        role: newUser.role,
-        balance: newUser.balance
+        role: newUser.role
       },
       token
     }, 201);
@@ -91,8 +89,7 @@ const login = async (req, res, next) => {
         id: user.id,
         name: user.name,
         email: user.email,
-        role: user.role,
-        balance: user.balance
+        role: user.role
       },
       token
     });
@@ -156,8 +153,7 @@ const googleLogin = async (req, res, next) => {
         name,
         email,
         password: dummyPassword,
-        role: 'user',
-        balance: 10000 // Welcome bonus of IDR 10,000 for social sign ups!
+        role: 'user'
       });
       console.log('New user created via Google login:', email);
     }
@@ -174,8 +170,7 @@ const googleLogin = async (req, res, next) => {
         id: user.id,
         name: user.name,
         email: user.email,
-        role: user.role,
-        balance: user.balance
+        role: user.role
       },
       token
     });
@@ -214,8 +209,7 @@ const facebookLogin = async (req, res, next) => {
         name,
         email,
         password: dummyPassword,
-        role: 'user',
-        balance: 10000 // welcome balance
+        role: 'user'
       });
     }
 
@@ -231,8 +225,7 @@ const facebookLogin = async (req, res, next) => {
         id: user.id,
         name: user.name,
         email: user.email,
-        role: user.role,
-        balance: user.balance
+        role: user.role
       },
       token
     });

@@ -1,370 +1,240 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import QrScanner from 'qr-scanner';
+import React, { useEffect, useMemo, useState } from 'react';
 import api from '../services/api';
 import { useAuth } from '../hooks/useAuth';
 import { formatRupiah } from '../utils/formatter';
 import {
   Scan,
+  Battery,
+  BatteryCharging,
   CheckCircle2,
   Loader2,
   AlertTriangle,
-  Camera,
-  CameraOff,
-  Cable,
-  Wallet,
   MapPin,
   RefreshCw,
-  BatteryCharging,
-  Check,
-  XCircle,
-  PlayCircle,
-  StopCircle
+  QrCode,
+  ExternalLink,
+  Copy,
+  Clock,
+  Unlock,
+  ArrowDownUp,
+  Zap
 } from 'lucide-react';
 
-const parseIntSafe = (value) => {
-  const parsed = parseInt(value, 10);
-  return Number.isFinite(parsed) ? parsed : 0;
-};
+const ACTIVE_SWAP_ORDER_KEY = 'spbklu_active_swap_order';
 
-const formatKwh = (watt) => `${(parseIntSafe(watt) / 1000).toFixed(2)} kWh`;
-const ACTIVE_CHARGING_STORAGE_KEY = 'spbklu_active_charging_session';
+const formatDateTime = (value) => {
+  if (!value) return '-';
+  return new Intl.DateTimeFormat('id-ID', {
+    dateStyle: 'medium',
+    timeStyle: 'short'
+  }).format(new Date(value));
+};
 
 const SwapQR = () => {
   const { user, refreshProfile } = useAuth();
-  const videoRef = useRef(null);
-  const scannerRef = useRef(null);
-  const mountedRef = useRef(false);
-  const scannerRunIdRef = useRef(0);
-  const scannedOnceRef = useRef(false);
 
-  const [scannerActive, setScannerActive] = useState(false);
-  const [scannerStarting, setScannerStarting] = useState(false);
-  const [scannedQrString, setScannedQrString] = useState('');
+  const [stations, setStations] = useState([]);
+  const [activeBattery, setActiveBattery] = useState(null);
+  const [selectedStationId, setSelectedStationId] = useState('');
+  const [selectedSlotId, setSelectedSlotId] = useState('');
+  const [emptyBatteryId, setEmptyBatteryId] = useState('');
 
-  const [cableInfo, setCableInfo] = useState(null);
-  const [inputMode, setInputMode] = useState('amount');
-  const [amount, setAmount] = useState('10000');
-  const [requestedWatt, setRequestedWatt] = useState('4000');
-
-  const [validating, setValidating] = useState(false);
+  const [paymentOrder, setPaymentOrder] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [completing, setCompleting] = useState(false);
-  const [restoringActive, setRestoringActive] = useState(true);
-  const [successResult, setSuccessResult] = useState(null);
-  const [completedResult, setCompletedResult] = useState(null);
+  const [checking, setChecking] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
 
-  const hardStopVideoTracks = () => {
-    const video = videoRef.current;
-    const stream = video?.srcObject;
+  const selectedStation = stations.find((station) => station.id === selectedStationId);
+  const readySlots = useMemo(() => {
+    return selectedStation?.slots?.filter((slot) => slot.status === 'ready' && slot.batteryId) || [];
+  }, [selectedStation]);
 
-    if (stream && typeof stream.getTracks === 'function') {
-      stream.getTracks().forEach((track) => {
-        try {
-          track.stop();
-        } catch (error) {
-          console.error('Failed to stop camera track:', error);
-        }
-      });
-    }
+  const selectedSlot = readySlots.find((slot) => String(slot.slotId) === String(selectedSlotId));
 
-    if (video) {
-      try {
-        video.pause();
-        video.srcObject = null;
-        video.removeAttribute('src');
-        video.load?.();
-      } catch (error) {
-        console.error('Failed to cleanup video element:', error);
-      }
-    }
-  };
-
-  const stopScanner = async (updateState = true) => {
-    // Invalidate pending scanner.start() promises to avoid white blank when
-    // navigating away while the camera is still opening.
-    scannerRunIdRef.current += 1;
-
-    const scanner = scannerRef.current;
-    scannerRef.current = null;
-
-    if (scanner) {
-      try {
-        await Promise.resolve(scanner.stop());
-      } catch (error) {
-        console.error('Failed to stop QR scanner:', error);
-      }
-
-      try {
-        scanner.destroy();
-      } catch (error) {
-        console.error('Failed to destroy QR scanner:', error);
-      }
-    }
-
-    hardStopVideoTracks();
-
-    if (updateState && mountedRef.current) {
-      setScannerActive(false);
-      setScannerStarting(false);
-    }
-  };
-
-  const restoreActiveChargingSession = async () => {
-    if (mountedRef.current) setRestoringActive(true);
+  const fetchInitialData = async () => {
+    setLoading(true);
+    setErrorMsg('');
 
     try {
-      const response = await api.get('/charging/active');
-      if (!mountedRef.current) return;
+      const [stationsRes, batteryRes, activeOrderRes] = await Promise.all([
+        api.get('/stations'),
+        api.get('/users/my-battery'),
+        api.get('/transactions/swap-order/active')
+      ]);
 
-      const active = response.data.data;
+      const activeStations = (stationsRes.data.data || []).filter((station) => station.status === 'active');
+      setStations(activeStations);
 
-      if (active?.session?.status === 'charging') {
-        setSuccessResult(active);
-        setCableInfo(null);
-        setScannedQrString('');
-        setCompletedResult(null);
-        setErrorMsg('');
-        setScannerActive(false);
-        localStorage.setItem(ACTIVE_CHARGING_STORAGE_KEY, JSON.stringify(active.session));
-      } else {
-        localStorage.removeItem(ACTIVE_CHARGING_STORAGE_KEY);
-        setScannerActive(true);
+      const heldBattery = batteryRes.data.data || null;
+      setActiveBattery(heldBattery);
+      if (heldBattery?.id) {
+        setEmptyBatteryId(heldBattery.id);
       }
-    } catch (error) {
-      if (!mountedRef.current) return;
 
-      console.error('Failed to restore active charging session:', error);
-      const cachedSession = localStorage.getItem(ACTIVE_CHARGING_STORAGE_KEY);
-      if (cachedSession) {
+      const activeOrder = activeOrderRes.data.data;
+      if (activeOrder?.status === 'pending') {
+        setPaymentOrder(activeOrder);
+        localStorage.setItem(ACTIVE_SWAP_ORDER_KEY, JSON.stringify(activeOrder));
+      } else {
+        localStorage.removeItem(ACTIVE_SWAP_ORDER_KEY);
+      }
+
+      await refreshProfile();
+    } catch (error) {
+      console.error('Failed to load swap order data:', error);
+      const cachedOrder = localStorage.getItem(ACTIVE_SWAP_ORDER_KEY);
+      if (cachedOrder) {
         try {
-          const session = JSON.parse(cachedSession);
-          setSuccessResult({ session, restored: true, offlineRestored: true, remainingBalance: user?.balance || 0 });
-          setScannerActive(false);
-          setErrorMsg('Gagal mengecek server. Sesi charging terakhir ditampilkan dari cache lokal; hubungkan kembali ke backend untuk menyelesaikan charging.');
+          setPaymentOrder(JSON.parse(cachedOrder));
+          setErrorMsg('Gagal menghubungi server. Pesanan pending terakhir ditampilkan dari cache lokal. Hubungkan kembali untuk cek status pembayaran.');
         } catch (_) {
-          localStorage.removeItem(ACTIVE_CHARGING_STORAGE_KEY);
-          setScannerActive(true);
+          localStorage.removeItem(ACTIVE_SWAP_ORDER_KEY);
         }
       } else {
-        setScannerActive(true);
+        setErrorMsg(error.response?.data?.message || 'Gagal memuat data swap baterai.');
       }
     } finally {
-      if (mountedRef.current) setRestoringActive(false);
+      setLoading(false);
     }
   };
 
   useEffect(() => {
-    mountedRef.current = true;
-    refreshProfile();
-    restoreActiveChargingSession();
-
-    return () => {
-      mountedRef.current = false;
-      stopScanner(false);
-    };
+    fetchInitialData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    if (!scannerActive || restoringActive || !videoRef.current) return undefined;
+    if (!paymentOrder?.transactionId || paymentOrder.status !== 'pending') return undefined;
 
-    let cancelled = false;
-    const runId = ++scannerRunIdRef.current;
+    const interval = setInterval(() => {
+      checkPaymentStatus({ silent: true });
+    }, 5000);
 
-    const start = async () => {
-      if (mountedRef.current) {
-        setScannerStarting(true);
-        setErrorMsg('');
-      }
-      scannedOnceRef.current = false;
-
-      let scanner = null;
-
-      try {
-        const hasCamera = await QrScanner.hasCamera();
-        if (!hasCamera) {
-          throw new Error('Kamera tidak ditemukan di perangkat ini.');
-        }
-
-        if (cancelled || !mountedRef.current || runId !== scannerRunIdRef.current || !videoRef.current) return;
-
-        scanner = new QrScanner(
-          videoRef.current,
-          (result) => {
-            if (cancelled || !mountedRef.current) return;
-
-            const qrText = typeof result === 'string' ? result : result?.data;
-            if (!qrText || scannedOnceRef.current) return;
-            scannedOnceRef.current = true;
-            handleQrDetected(qrText);
-          },
-          {
-            preferredCamera: 'environment',
-            maxScansPerSecond: 6,
-            highlightScanRegion: true,
-            highlightCodeOutline: true,
-            returnDetailedScanResult: true
-          }
-        );
-
-        scannerRef.current = scanner;
-        await scanner.start();
-
-        if (cancelled || !mountedRef.current || runId !== scannerRunIdRef.current) {
-          try { await Promise.resolve(scanner.stop()); } catch (_) {}
-          try { scanner.destroy(); } catch (_) {}
-          hardStopVideoTracks();
-        }
-      } catch (error) {
-        if (!cancelled && mountedRef.current && runId === scannerRunIdRef.current) {
-          console.error('QR scanner failed:', error);
-          setErrorMsg(error.message || 'Gagal membuka kamera. Pastikan izin kamera sudah diberikan.');
-          setScannerActive(false);
-        } else if (scanner) {
-          try { await Promise.resolve(scanner.stop()); } catch (_) {}
-          try { scanner.destroy(); } catch (_) {}
-          hardStopVideoTracks();
-        }
-      } finally {
-        if (!cancelled && mountedRef.current && runId === scannerRunIdRef.current) {
-          setScannerStarting(false);
-        }
-      }
-    };
-
-    start();
-
-    return () => {
-      cancelled = true;
-      stopScanner(false);
-    };
+    return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scannerActive, restoringActive]);
+  }, [paymentOrder?.transactionId, paymentOrder?.status]);
 
-  const resetFlow = async () => {
-    await stopScanner();
-    setScannedQrString('');
-    setCableInfo(null);
-    setInputMode('amount');
-    setAmount('10000');
-    setRequestedWatt('4000');
-    setSuccessResult(null);
-    setCompletedResult(null);
+  const resetOrderFlow = () => {
+    localStorage.removeItem(ACTIVE_SWAP_ORDER_KEY);
+    setPaymentOrder(null);
+    setSuccessMsg('');
     setErrorMsg('');
-    setScannerActive(true);
+    setSelectedStationId('');
+    setSelectedSlotId('');
   };
 
-  const validateQrString = async (qrString) => {
-    setValidating(true);
-    setErrorMsg('');
-    setSuccessResult(null);
-    setCompletedResult(null);
-
-    try {
-      const response = await api.post('/charging/scan', { qrString });
-      if (!mountedRef.current) return;
-      const data = response.data.data;
-      setCableInfo(data);
-      setScannedQrString(qrString);
-      setAmount(String(Math.max(data.pricing?.minAmount || 1000, 10000)));
-    } catch (error) {
-      if (!mountedRef.current) return;
-      console.error('QR validation failed:', error);
-      setErrorMsg(error.response?.data?.message || error.message || 'QR Code tidak valid.');
-      scannedOnceRef.current = false;
-    } finally {
-      if (mountedRef.current) setValidating(false);
-    }
-  };
-
-  const handleQrDetected = async (qrString) => {
-    await stopScanner();
-    await validateQrString(qrString);
-  };
-
-  const chargingPreview = useMemo(() => {
-    const pricePerKwh = cableInfo?.cable?.pricePerKwh || cableInfo?.pricing?.pricePerKwh || 2500;
-
-    if (inputMode === 'amount') {
-      const parsedAmount = parseIntSafe(amount);
-      const estimatedWatt = pricePerKwh > 0 ? Math.floor((parsedAmount / pricePerKwh) * 1000) : 0;
-      return {
-        amount: parsedAmount,
-        watt: estimatedWatt,
-        kwh: estimatedWatt / 1000
-      };
-    }
-
-    const parsedWatt = parseIntSafe(requestedWatt);
-    const estimatedAmount = Math.ceil((parsedWatt / 1000) * pricePerKwh);
-    return {
-      amount: estimatedAmount,
-      watt: parsedWatt,
-      kwh: parsedWatt / 1000
-    };
-  }, [amount, requestedWatt, inputMode, cableInfo]);
-
-  const startCharging = async (e) => {
+  const createSwapOrder = async (e) => {
     e.preventDefault();
-    if (!cableInfo || !scannedQrString) return;
-
     setErrorMsg('');
+    setSuccessMsg('');
+
+    if (!selectedStationId || !selectedSlotId || !emptyBatteryId) {
+      setErrorMsg('Pilih stasiun, slot baterai penuh, dan ID baterai habis terlebih dahulu.');
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {
-      const payload = {
-        qrString: scannedQrString,
-        ...(inputMode === 'amount'
-          ? { amount: parseIntSafe(amount) }
-          : { requestedWatt: parseIntSafe(requestedWatt) })
-      };
+      const response = await api.post('/transactions/swap-order', {
+        stationId: selectedStationId,
+        slotId: parseInt(selectedSlotId, 10),
+        emptyBatteryId
+      });
 
-      const response = await api.post('/charging/start', payload);
-      if (!mountedRef.current) return;
-      setSuccessResult(response.data.data);
-      if (response.data.data?.session) {
-        localStorage.setItem(ACTIVE_CHARGING_STORAGE_KEY, JSON.stringify(response.data.data.session));
-      }
-      await refreshProfile();
+      const order = response.data.data;
+      setPaymentOrder(order);
+      localStorage.setItem(ACTIVE_SWAP_ORDER_KEY, JSON.stringify(order));
+      setSuccessMsg('Pesanan dibuat. Scan QRIS untuk membuka slot baterai.');
     } catch (error) {
-      if (!mountedRef.current) return;
-      console.error('Start charging failed:', error);
-      setErrorMsg(error.response?.data?.message || error.message || 'Gagal memulai charging.');
+      console.error('Failed to create swap order:', error);
+      setErrorMsg(error.response?.data?.message || 'Gagal membuat pesanan swap baterai.');
     } finally {
-      if (mountedRef.current) setIsSubmitting(false);
+      setIsSubmitting(false);
     }
   };
 
-  const completeCharging = async () => {
-    if (!successResult?.session?.sessionId) return;
-    setCompleting(true);
+  const checkPaymentStatus = async ({ silent = false } = {}) => {
+    if (!paymentOrder?.transactionId) return;
+
+    if (!silent) {
+      setChecking(true);
+      setErrorMsg('');
+      setSuccessMsg('');
+    }
+
+    try {
+      const response = await api.get(`/transactions/swap-order/${paymentOrder.transactionId}`);
+      const latest = response.data.data;
+      setPaymentOrder(latest);
+
+      if (latest.status === 'pending') {
+        localStorage.setItem(ACTIVE_SWAP_ORDER_KEY, JSON.stringify(latest));
+        if (!silent) setErrorMsg('Pembayaran belum diterima. Silakan selesaikan pembayaran QRIS.');
+      } else if (latest.status === 'completed') {
+        localStorage.removeItem(ACTIVE_SWAP_ORDER_KEY);
+        setSuccessMsg('Pembayaran berhasil. Slot baterai sudah terbuka otomatis.');
+        await refreshProfile();
+      } else if (latest.status === 'failed') {
+        localStorage.removeItem(ACTIVE_SWAP_ORDER_KEY);
+        setErrorMsg('Pesanan gagal/kadaluarsa. Silakan buat pesanan baru.');
+      }
+    } catch (error) {
+      console.error('Failed to check swap payment:', error);
+      if (!silent) setErrorMsg(error.response?.data?.message || 'Gagal mengecek status pembayaran.');
+    } finally {
+      if (!silent) setChecking(false);
+    }
+  };
+
+  const simulatePayment = async () => {
+    if (!paymentOrder?.transactionId) return;
+    setChecking(true);
     setErrorMsg('');
 
     try {
-      const response = await api.post(`/charging/${successResult.session.sessionId}/complete`);
-      if (!mountedRef.current) return;
-      setCompletedResult(response.data.data);
-      localStorage.removeItem(ACTIVE_CHARGING_STORAGE_KEY);
+      const response = await api.post(`/transactions/swap-order/${paymentOrder.transactionId}/simulate`);
+      const latest = response.data.data;
+      setPaymentOrder(latest);
+      localStorage.removeItem(ACTIVE_SWAP_ORDER_KEY);
+      setSuccessMsg('Simulasi pembayaran berhasil. Slot baterai sudah terbuka otomatis.');
       await refreshProfile();
     } catch (error) {
-      if (!mountedRef.current) return;
-      console.error('Complete charging failed:', error);
-      setErrorMsg(error.response?.data?.message || error.message || 'Gagal menyelesaikan sesi charging.');
+      console.error('Failed to simulate swap payment:', error);
+      setErrorMsg(error.response?.data?.message || 'Gagal menjalankan simulasi pembayaran.');
     } finally {
-      if (mountedRef.current) setCompleting(false);
+      setChecking(false);
     }
   };
 
+  const copyText = async (text, label) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setSuccessMsg(`${label} disalin.`);
+    } catch (_) {
+      setErrorMsg(`Gagal menyalin ${label}.`);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-50 p-5 pb-24 flex flex-col items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-emerald-500" />
+        <span className="mt-3 text-xs text-slate-400 font-bold">Memuat Pemesanan Swap Baterai...</span>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 p-5 pb-24 space-y-6">
-      {/* Header */}
       <div className="text-center pt-4 space-y-1">
         <div className="inline-flex bg-emerald-50 text-emerald-500 border border-emerald-100 p-2.5 rounded-2xl mb-1">
           <Scan className="h-6 w-6 stroke-[3]" />
         </div>
-        <h2 className="text-lg font-black text-slate-800 tracking-tight">Scan QR Charger</h2>
-        <p className="text-xs font-semibold text-slate-400">Pindai QR Code pada unit SPBKLU, lalu pilih nominal atau watt pengisian kendaraan.</p>
+        <h2 className="text-lg font-black text-slate-800 tracking-tight">Pesan Swap Baterai</h2>
+        <p className="text-xs font-semibold text-slate-400">Pilih baterai penuh, bayar QRIS di aplikasi, lalu slot akan terbuka otomatis.</p>
       </div>
 
       {errorMsg && (
@@ -374,291 +244,183 @@ const SwapQR = () => {
         </div>
       )}
 
-      {restoringActive ? (
-        <div className="bg-white border border-slate-200 rounded-2xl p-6 text-center shadow-sm space-y-3">
-          <Loader2 className="h-8 w-8 animate-spin text-emerald-500 mx-auto" />
-          <h3 className="font-black text-slate-800 text-sm">Memulihkan Sesi Charging...</h3>
-          <p className="text-xs font-semibold text-slate-400">Aplikasi sedang mengecek apakah ada charging aktif yang belum diselesaikan.</p>
+      {successMsg && (
+        <div className="bg-emerald-50 border border-emerald-100 p-3.5 rounded-xl text-emerald-700 flex items-start gap-2 text-xs font-bold leading-relaxed">
+          <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-500" />
+          <div>{successMsg}</div>
         </div>
-      ) : completedResult ? (
-        <div className="bg-white border rounded-2xl p-6 text-center shadow-xl border-slate-200 animate-scaleUp space-y-5">
+      )}
+
+      {paymentOrder?.status === 'completed' ? (
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 text-center shadow-xl space-y-5">
           <div className="bg-emerald-500 text-white p-3 rounded-full shadow-lg shadow-emerald-500/20 inline-flex">
-            <Check className="h-10 w-10 stroke-[3]" />
+            <Unlock className="h-10 w-10" />
           </div>
           <div>
-            <h3 className="text-lg font-black text-slate-800">Charging Selesai</h3>
-            <p className="text-xs font-semibold text-slate-400 mt-1">Terima kasih telah menggunakan SPBKLU.</p>
-          </div>
-          <div className="bg-slate-50 p-4 border rounded-xl text-left text-xs font-semibold space-y-2 text-slate-600">
-            <div className="flex justify-between border-b pb-2 border-slate-200/80">
-              <span className="text-slate-400">ID SESI</span>
-              <span className="font-extrabold text-slate-800">#{completedResult.session.sessionId}</span>
-            </div>
-            <div className="flex justify-between">
-              <span>Kabel</span>
-              <span className="font-extrabold text-slate-800">{completedResult.session.cableName}</span>
-            </div>
-            <div className="flex justify-between">
-              <span>Total Pengisian</span>
-              <span className="font-extrabold text-emerald-600">{formatKwh(completedResult.session.requestedWatt)}</span>
-            </div>
-          </div>
-          <button onClick={resetFlow} className="w-full py-3 bg-slate-900 text-white font-black text-sm rounded-xl shadow transition">
-            Scan QR Lagi
-          </button>
-        </div>
-      ) : successResult ? (
-        <div className="bg-white border rounded-2xl p-6 text-center shadow-xl border-slate-200 animate-scaleUp space-y-5">
-          <div className="bg-emerald-500 text-white p-3 rounded-full shadow-lg shadow-emerald-500/20 inline-flex">
-            <CheckCircle2 className="h-10 w-10 stroke-[2.5]" />
-          </div>
-          <div className="space-y-1">
-            <h3 className="text-lg font-black text-slate-800">Charging Dimulai!</h3>
-            <p className="text-xs font-semibold text-emerald-600">Kabel charger aktif. Silakan mulai mengisi kendaraan.</p>
-            {successResult.restored && (
-              <p className="text-[10px] font-bold text-blue-500 mt-1">Sesi ini dipulihkan dari server setelah aplikasi ditutup/background.</p>
-            )}
+            <h3 className="text-lg font-black text-slate-800">Baterai Terlepas Otomatis</h3>
+            <p className="text-xs font-semibold text-emerald-600 mt-1">Pembayaran berhasil. Silakan ambil baterai penuh dan masukkan baterai habis Anda.</p>
           </div>
 
           <div className="bg-slate-50 p-4 border rounded-xl text-left text-xs font-semibold space-y-2 text-slate-600">
             <div className="flex justify-between border-b pb-2 border-slate-200/80">
-              <span className="text-slate-400">ID SESI</span>
-              <span className="font-extrabold text-slate-800">#{successResult.session.sessionId}</span>
-            </div>
-            <div className="flex justify-between">
-              <span>Kabel</span>
-              <span className="font-extrabold text-slate-800">{successResult.session.cableName}</span>
+              <span className="text-slate-400">ID TRANSAKSI</span>
+              <span className="font-extrabold text-slate-800">#{paymentOrder.transactionId}</span>
             </div>
             <div className="flex justify-between">
               <span>Stasiun</span>
-              <span className="font-extrabold text-slate-800 text-right">{successResult.session.stationName || '-'}</span>
+              <span className="font-extrabold text-slate-800 text-right">{paymentOrder.stationName}</span>
             </div>
             <div className="flex justify-between">
-              <span>Target Energi</span>
-              <span className="font-extrabold text-emerald-600">{formatKwh(successResult.session.requestedWatt)}</span>
+              <span>Slot Terbuka</span>
+              <span className="font-extrabold text-emerald-600">Slot {paymentOrder.slotId}</span>
             </div>
             <div className="flex justify-between">
-              <span>Biaya</span>
-              <span className="font-extrabold text-slate-800">{formatRupiah(successResult.session.amount)}</span>
+              <span>Baterai Diambil</span>
+              <span className="font-extrabold text-emerald-600">{paymentOrder.fullBatteryId}</span>
             </div>
-            <div className="flex justify-between pt-2 border-t border-slate-200/80 font-bold">
-              <span>Sisa Saldo</span>
-              <span className="font-black text-emerald-600 text-sm">{formatRupiah(successResult.remainingBalance)}</span>
+            <div className="flex justify-between">
+              <span>Baterai Habis Masuk</span>
+              <span className="font-extrabold text-rose-500">{paymentOrder.emptyBatteryId}</span>
+            </div>
+            <div className="flex justify-between pt-2 border-t border-slate-200/80">
+              <span>Kode Release</span>
+              <span className="font-black text-slate-900">{paymentOrder.releaseCode || '-'}</span>
             </div>
           </div>
 
-          <button
-            onClick={completeCharging}
-            disabled={completing}
-            className="w-full py-3 bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-black text-sm rounded-xl shadow-lg disabled:opacity-50 transition flex items-center justify-center gap-2"
-          >
-            {completing ? <Loader2 className="h-5 w-5 animate-spin" /> : <StopCircle className="h-5 w-5" />}
-            Selesai Mengisi
+          <button onClick={resetOrderFlow} className="w-full py-3 bg-slate-900 text-white font-black text-sm rounded-xl shadow transition">
+            Pesan Swap Lagi
           </button>
-          <p className="text-[10px] text-slate-400 font-semibold leading-relaxed">Tombol ini mensimulasikan sinyal selesai dari perangkat IoT charger.</p>
         </div>
-      ) : !cableInfo ? (
-        <div className="space-y-5">
-          <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="font-black text-slate-800 text-sm">1. Scan QR pada unit SPBKLU</h3>
-                <p className="text-xs text-slate-400 font-semibold mt-0.5">Kamera terbuka otomatis. Arahkan ke QR Code yang sudah digenerate admin.</p>
-              </div>
-              <div className="bg-emerald-50 text-emerald-500 border border-emerald-100 p-2 rounded-xl">
-                <Camera className="h-5 w-5" />
-              </div>
+      ) : paymentOrder?.status === 'pending' ? (
+        <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-5">
+          <div className="text-center space-y-1">
+            <div className="inline-flex items-center gap-1.5 bg-amber-50 text-amber-600 border border-amber-100 px-3 py-1 rounded-full text-[10px] font-black uppercase">
+              <Clock className="h-3 w-3" /> Menunggu Pembayaran
             </div>
+            <h3 className="text-sm font-black text-slate-800">Scan QRIS Pakasir</h3>
+            <p className="text-xs font-semibold text-slate-400">Setelah pembayaran sukses, slot baterai akan terbuka otomatis.</p>
+          </div>
 
-            {scannerActive && (
-              <div className="relative rounded-2xl overflow-hidden border-4 border-slate-900 bg-slate-950 aspect-square shadow-xl">
-                <video ref={videoRef} className="h-full w-full object-cover" muted playsInline />
-                {scannerStarting && (
-                  <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950/70 text-white">
-                    <Loader2 className="h-8 w-8 animate-spin text-emerald-400" />
-                    <span className="mt-3 text-xs font-bold">Membuka kamera...</span>
-                  </div>
-                )}
-                <div className="absolute inset-x-8 top-1/2 h-0.5 bg-emerald-400 shadow-[0_0_18px_#34d399] animate-pulse" />
+          <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 flex items-center justify-center">
+            {paymentOrder.qrImage ? (
+              <img src={paymentOrder.qrImage} alt="QRIS Pembayaran Swap" className="w-60 h-60 rounded-xl bg-white border border-slate-100" />
+            ) : (
+              <div className="w-60 h-60 rounded-xl bg-white border border-slate-100 flex items-center justify-center text-slate-300">
+                <QrCode className="h-20 w-20" />
               </div>
             )}
-
-            <div className="grid grid-cols-2 gap-3">
-              {!scannerActive ? (
-                <button
-                  onClick={() => setScannerActive(true)}
-                  disabled={validating}
-                  className="py-3 bg-emerald-500 hover:bg-emerald-600 text-white font-black text-xs rounded-xl transition flex items-center justify-center gap-2 disabled:opacity-50"
-                >
-                  {validating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Camera className="h-4 w-4" />}
-                  Buka Kamera
-                </button>
-              ) : (
-                <button
-                  onClick={stopScanner}
-                  className="py-3 bg-slate-900 hover:bg-slate-800 text-white font-black text-xs rounded-xl transition flex items-center justify-center gap-2"
-                >
-                  <CameraOff className="h-4 w-4" />
-                  Tutup Kamera
-                </button>
-              )}
-              <button
-                onClick={resetFlow}
-                className="py-3 border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 font-black text-xs rounded-xl transition flex items-center justify-center gap-2"
-              >
-                <RefreshCw className="h-4 w-4" />
-                Scan Ulang
-              </button>
-            </div>
           </div>
 
+          <div className="bg-white border border-slate-200 rounded-2xl p-4 text-xs font-semibold text-slate-600 space-y-2.5">
+            <div className="flex justify-between gap-3 border-b border-slate-100 pb-2">
+              <span className="text-slate-400">Order ID</span>
+              <button onClick={() => copyText(paymentOrder.transactionId, 'Order ID')} className="font-black text-slate-800 text-right flex items-center gap-1 justify-end">
+                {paymentOrder.transactionId}
+                <Copy className="h-3 w-3 text-slate-400" />
+              </button>
+            </div>
+            <div className="flex justify-between"><span>Stasiun</span><span className="font-black text-slate-800 text-right">{paymentOrder.stationName}</span></div>
+            <div className="flex justify-between"><span>Slot/Baterai</span><span className="font-black text-emerald-600">Slot {paymentOrder.slotId} • {paymentOrder.fullBatteryId}</span></div>
+            <div className="flex justify-between"><span>Baterai habis</span><span className="font-black text-rose-500">{paymentOrder.emptyBatteryId}</span></div>
+            <div className="flex justify-between border-t border-slate-100 pt-2"><span>Total Bayar</span><span className="font-black text-slate-900 text-sm">{formatRupiah(paymentOrder.totalPayment)}</span></div>
+            <div className="flex justify-between"><span>Kadaluarsa</span><span className="font-black text-amber-600 text-right">{formatDateTime(paymentOrder.expiredAt)}</span></div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <button type="button" onClick={() => checkPaymentStatus()} disabled={checking} className="py-2.5 bg-emerald-500 hover:bg-emerald-600 font-bold text-xs text-white rounded-xl shadow-lg disabled:opacity-50 transition flex items-center justify-center gap-1.5">
+              {checking ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              Cek Status
+            </button>
+            {paymentOrder.checkoutUrl ? (
+              <a href={paymentOrder.checkoutUrl} target="_blank" rel="noreferrer" className="py-2.5 border border-slate-200 hover:bg-slate-50 font-bold text-xs text-slate-600 rounded-xl transition flex items-center justify-center gap-1.5">
+                <ExternalLink className="h-4 w-4" /> Buka Pakasir
+              </a>
+            ) : (
+              <button type="button" onClick={() => copyText(paymentOrder.qrString || '', 'QR String')} className="py-2.5 border border-slate-200 hover:bg-slate-50 font-bold text-xs text-slate-600 rounded-xl transition flex items-center justify-center gap-1.5">
+                <Copy className="h-4 w-4" /> Salin QR
+              </button>
+            )}
+          </div>
+
+          {import.meta.env.DEV && (
+            <button type="button" onClick={simulatePayment} disabled={checking} className="w-full py-2.5 bg-amber-50 border border-amber-100 hover:bg-amber-100 font-bold text-xs text-amber-700 rounded-xl transition flex items-center justify-center gap-1.5 disabled:opacity-50">
+              {checking ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+              Simulasikan Pembayaran Sandbox
+            </button>
+          )}
         </div>
       ) : (
-        <form onSubmit={startCharging} className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-5">
-          <div className="flex items-start justify-between gap-3 border-b border-slate-100 pb-4">
-            <div className="flex items-start gap-3">
-              <div className="bg-emerald-50 text-emerald-500 border border-emerald-100 p-2.5 rounded-xl">
-                <Cable className="h-5 w-5" />
-              </div>
-              <div>
-                <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">QR Valid</span>
-                <h3 className="font-black text-slate-800 text-sm mt-0.5">{cableInfo.cable.name}</h3>
-                <p className="text-[10px] text-slate-400 font-bold">{cableInfo.cable.id} • {cableInfo.cable.type}</p>
-              </div>
+        <form onSubmit={createSwapOrder} className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-5">
+          <div className="bg-slate-900 text-white rounded-2xl p-4 flex items-start gap-3">
+            <div className="bg-white/10 text-emerald-400 border border-white/10 p-2 rounded-xl">
+              <Battery className="h-5 w-5" />
             </div>
-            <button type="button" onClick={resetFlow} className="text-slate-400 hover:text-rose-500 transition">
-              <XCircle className="h-5 w-5" />
-            </button>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3 text-xs font-semibold text-slate-600">
-            <div className="bg-slate-50 border rounded-xl p-3">
-              <span className="text-[9px] font-black text-slate-400 uppercase block mb-1">Lokasi</span>
-              <div className="flex items-start gap-1.5">
-                <MapPin className="h-4 w-4 text-rose-500 shrink-0" />
-                <span className="font-extrabold text-slate-800">{cableInfo.cable.stationName || 'SPBKLU'}</span>
-              </div>
-            </div>
-            <div className="bg-slate-50 border rounded-xl p-3">
-              <span className="text-[9px] font-black text-slate-400 uppercase block mb-1">Tarif</span>
-              <span className="font-extrabold text-slate-800">{formatRupiah(cableInfo.cable.pricePerKwh)}/kWh</span>
-            </div>
-            <div className="bg-slate-50 border rounded-xl p-3">
-              <span className="text-[9px] font-black text-slate-400 uppercase block mb-1">Daya Maks</span>
-              <span className="font-extrabold text-emerald-600">{cableInfo.cable.powerWatt} W</span>
-            </div>
-            <div className="bg-slate-50 border rounded-xl p-3">
-              <span className="text-[9px] font-black text-slate-400 uppercase block mb-1">Saldo</span>
-              <span className="font-extrabold text-slate-800">{formatRupiah(user?.balance || 0)}</span>
+            <div>
+              <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Baterai yang Anda bawa</span>
+              <h3 className="font-black text-white text-sm mt-0.5">{activeBattery?.id || emptyBatteryId || 'Belum terdeteksi'}</h3>
+              <p className="text-[10px] font-semibold text-slate-400 mt-1">Baterai ini akan dimasukkan ke slot setelah baterai penuh terlepas.</p>
             </div>
           </div>
 
-          <div className="space-y-3">
-            <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">2. Pilih metode input pengisian</label>
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => setInputMode('amount')}
-                className={`py-2.5 rounded-xl border text-xs font-black flex items-center justify-center gap-1.5 ${inputMode === 'amount' ? 'bg-emerald-50 border-emerald-300 text-emerald-600' : 'bg-slate-50 border-slate-200 text-slate-500'}`}
-              >
-                <Wallet className="h-4 w-4" /> Nominal Rp
-              </button>
-              <button
-                type="button"
-                onClick={() => setInputMode('watt')}
-                className={`py-2.5 rounded-xl border text-xs font-black flex items-center justify-center gap-1.5 ${inputMode === 'watt' ? 'bg-emerald-50 border-emerald-300 text-emerald-600' : 'bg-slate-50 border-slate-200 text-slate-500'}`}
-              >
-                <BatteryCharging className="h-4 w-4" /> Target Watt
-              </button>
-            </div>
+          <div className="space-y-1.5">
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">1. ID Baterai Habis / Yang Akan Diganti</label>
+            <input
+              value={emptyBatteryId}
+              onChange={(e) => setEmptyBatteryId(e.target.value)}
+              placeholder="Contoh: BT-901"
+              className="w-full px-4 py-3 bg-slate-50 border border-slate-250 rounded-xl text-slate-800 font-extrabold text-sm focus:outline-none"
+              required
+            />
           </div>
 
-          {inputMode === 'amount' ? (
-            <div className="space-y-1.5">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">Nominal pembayaran</label>
-              <div className="relative">
-                <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400 font-extrabold text-xs">Rp</span>
-                <input
-                  type="number"
-                  min={cableInfo.pricing.minAmount}
-                  step={cableInfo.pricing.amountStep}
-                  required
-                  value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
-                  className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-250 rounded-xl text-slate-800 font-extrabold text-sm focus:outline-none"
-                />
-              </div>
-              <div className="grid grid-cols-3 gap-2 pt-1">
-                {[10000, 20000, 50000].map((preset) => (
-                  <button key={preset} type="button" onClick={() => setAmount(String(preset))} className="py-2 bg-slate-50 border rounded-xl text-[10px] font-black text-slate-600">
-                    {formatRupiah(preset)}
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-1.5">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">Target energi pengisian watt-hour (Wh)</label>
-              <div className="relative">
-                <input
-                  type="number"
-                  min="1"
-                  step="100"
-                  required
-                  value={requestedWatt}
-                  onChange={(e) => setRequestedWatt(e.target.value)}
-                  className="w-full pr-12 px-4 py-3 bg-slate-50 border border-slate-250 rounded-xl text-slate-800 font-extrabold text-sm focus:outline-none"
-                />
-                <span className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 font-extrabold text-xs">Wh</span>
-              </div>
-              <div className="grid grid-cols-3 gap-2 pt-1">
-                {[2000, 4000, 10000].map((preset) => (
-                  <button key={preset} type="button" onClick={() => setRequestedWatt(String(preset))} className="py-2 bg-slate-50 border rounded-xl text-[10px] font-black text-slate-600">
-                    {formatKwh(preset)}
-                  </button>
-                ))}
-              </div>
+          <div className="space-y-1.5">
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">2. Pilih Lokasi Stasiun</label>
+            <select value={selectedStationId} onChange={(e) => { setSelectedStationId(e.target.value); setSelectedSlotId(''); }} className="w-full px-4 py-3 bg-slate-50 border border-slate-250 rounded-xl text-slate-800 font-bold text-sm focus:outline-none">
+              <option value="">-- Pilih Stasiun --</option>
+              {stations.map((station) => <option key={station.id} value={station.id}>{station.name} ({station.id})</option>)}
+            </select>
+          </div>
+
+          {selectedStationId && (
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">3. Pilih Baterai Penuh Siap Ambil</label>
+              {readySlots.length > 0 ? (
+                <div className="grid grid-cols-2 gap-3">
+                  {readySlots.map((slot) => (
+                    <button
+                      key={slot.slotId}
+                      type="button"
+                      onClick={() => setSelectedSlotId(String(slot.slotId))}
+                      className={`p-3 border rounded-xl text-left transition-all ${selectedSlotId === String(slot.slotId) ? 'border-emerald-500 bg-emerald-50 ring-2 ring-emerald-500/10' : 'border-slate-200 bg-slate-50'}`}
+                    >
+                      <span className="text-[9px] font-black text-slate-400 uppercase block">Slot {slot.slotId}</span>
+                      <span className="text-xs font-extrabold text-slate-800 block mt-0.5">{slot.batteryId}</span>
+                      <span className="text-[10px] font-black text-emerald-500 bg-emerald-500/10 border border-emerald-500/15 px-2 py-0.5 rounded-md inline-flex items-center gap-1 mt-1.5">
+                        <BatteryCharging className="h-3 w-3" /> {slot.chargeLevel || 100}%
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="bg-orange-50 border border-orange-100 rounded-xl p-4 text-center text-xs font-bold text-orange-600">Tidak ada baterai penuh yang siap diambil di stasiun ini.</div>
+              )}
             </div>
           )}
 
-          <div className="bg-slate-900 text-white rounded-2xl p-4 space-y-2 text-xs font-semibold">
-            <div className="flex justify-between">
-              <span className="text-slate-400">Estimasi energi</span>
-              <span className="font-black text-emerald-400">{formatKwh(chargingPreview.watt)}</span>
+          {selectedSlot && (
+            <div className="bg-emerald-50 border border-emerald-100 rounded-2xl p-4 text-xs font-semibold text-emerald-700 space-y-2">
+              <div className="flex items-center gap-2 font-black text-emerald-800"><ArrowDownUp className="h-4 w-4" /> Ringkasan Swap</div>
+              <div className="flex justify-between"><span>Ambil</span><span className="font-black">{selectedSlot.batteryId}</span></div>
+              <div className="flex justify-between"><span>Masukkan</span><span className="font-black">{emptyBatteryId || '-'}</span></div>
+              <div className="flex justify-between border-t border-emerald-100 pt-2"><span>Biaya QRIS</span><span className="font-black">{formatRupiah(10000)}</span></div>
             </div>
-            <div className="flex justify-between">
-              <span className="text-slate-400">Estimasi biaya</span>
-              <span className="font-black text-white text-sm">{formatRupiah(chargingPreview.amount)}</span>
-            </div>
-            <div className="flex justify-between border-t border-slate-800 pt-2">
-              <span className="text-slate-400">Sisa saldo setelah transaksi</span>
-              <span className={`font-black ${(user?.balance || 0) >= chargingPreview.amount ? 'text-emerald-400' : 'text-rose-400'}`}>
-                {formatRupiah((user?.balance || 0) - chargingPreview.amount)}
-              </span>
-            </div>
-          </div>
+          )}
 
-          <button
-            type="submit"
-            disabled={isSubmitting || !chargingPreview.amount || (user?.balance || 0) < chargingPreview.amount}
-            className="w-full py-3 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white font-black text-sm rounded-xl shadow-lg shadow-emerald-500/15 disabled:opacity-50 transition flex items-center justify-center gap-2 active:scale-[0.99]"
-          >
-            {isSubmitting ? (
-              <>
-                <Loader2 className="h-5 w-5 animate-spin" />
-                <span>Memulai Charging...</span>
-              </>
-            ) : (
-              <>
-                <PlayCircle className="h-5 w-5" />
-                <span>Mulai Charging</span>
-              </>
-            )}
+          <button type="submit" disabled={isSubmitting || !selectedStationId || !selectedSlotId || !emptyBatteryId} className="w-full py-3 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white font-black text-sm rounded-xl shadow-lg shadow-emerald-500/15 disabled:opacity-50 transition flex items-center justify-center gap-2 active:scale-[0.99]">
+            {isSubmitting ? <Loader2 className="h-5 w-5 animate-spin" /> : <QrCode className="h-5 w-5" />}
+            Buat Barcode/QRIS Pembayaran
           </button>
-
-          {(user?.balance || 0) < chargingPreview.amount && (
-            <p className="text-[10px] text-rose-500 font-bold text-center">Saldo tidak mencukupi. Silakan top up saldo dari halaman Akun.</p>
-          )}
         </form>
       )}
     </div>

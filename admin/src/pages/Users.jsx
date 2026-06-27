@@ -2,10 +2,9 @@ import React, { useState, useEffect } from 'react';
 import api from '../services/api';
 import Table from '../components/Table';
 import { useAuth } from '../hooks/useAuth';
-import { formatDate, formatRupiah } from '../utils/formatter';
+import { formatDate } from '../utils/formatter';
 import { 
   Search, 
-  Coins, 
   X, 
   Check, 
   Loader, 
@@ -26,7 +25,6 @@ const Users = () => {
   const [searchQuery, setSearchQuery] = useState('');
   
   // Modals visibility
-  const [showTopUpModal, setShowTopUpModal] = useState(false);
   const [showFormModal, setShowFormModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
 
@@ -38,11 +36,9 @@ const Users = () => {
     name: '',
     email: '',
     password: '',
-    role: 'user',
-    balance: '0'
+    role: 'user'
   });
 
-  const [topUpAmount, setTopUpAmount] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
@@ -63,40 +59,6 @@ const Users = () => {
     fetchUsers();
   }, []);
 
-  // --- TOP UP FUNCTIONS ---
-  const handleOpenTopUp = (user) => {
-    setSelectedUser(user);
-    setTopUpAmount('');
-    setSuccessMsg('');
-    setErrorMsg('');
-    setShowTopUpModal(true);
-  };
-
-  const handleTopUpSubmit = async (e) => {
-    e.preventDefault();
-    if (!topUpAmount || parseInt(topUpAmount) <= 0) return;
-
-    setIsSubmitting(true);
-    setErrorMsg('');
-    try {
-      const response = await api.post(`/admin/users/${selectedUser.id}/topup`, {
-        amount: parseInt(topUpAmount)
-      });
-      
-      setSuccessMsg(response.data.message || 'Saldo berhasil ditambahkan!');
-      fetchUsers();
-      setTimeout(() => {
-        setShowTopUpModal(false);
-        setSelectedUser(null);
-      }, 1500);
-    } catch (error) {
-      console.error('Gagal top up:', error);
-      setErrorMsg(error.response?.data?.message || 'Gagal mengisi saldo.');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
   // --- CREATE / EDIT FUNCTIONS ---
   const handleOpenAdd = () => {
     setIsEditMode(false);
@@ -105,8 +67,7 @@ const Users = () => {
       name: '',
       email: '',
       password: '',
-      role: 'user',
-      balance: '0'
+      role: 'user'
     });
     setSuccessMsg('');
     setErrorMsg('');
@@ -120,8 +81,7 @@ const Users = () => {
       name: user.name,
       email: user.email,
       password: '', // Blank password unless they want to change it
-      role: user.role,
-      balance: String(user.balance || 0)
+      role: user.role
     });
     setSuccessMsg('');
     setErrorMsg('');
@@ -152,7 +112,6 @@ const Users = () => {
           name: formData.name,
           email: formData.email,
           role: formData.role,
-          balance: formData.role === 'admin' ? 0 : parseInt(formData.balance || 0),
           password: formData.password || undefined // Only send if not blank
         });
         setSuccessMsg('Akun berhasil diperbarui!');
@@ -162,8 +121,7 @@ const Users = () => {
           name: formData.name,
           email: formData.email,
           password: formData.password,
-          role: formData.role,
-          balance: formData.role === 'admin' ? 0 : parseInt(formData.balance || 0)
+          role: formData.role
         });
         setSuccessMsg('Akun baru berhasil didaftarkan!');
       }
@@ -227,7 +185,7 @@ const Users = () => {
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-black text-slate-800 tracking-tight">Manajemen Akun User</h1>
-          <p className="text-sm font-medium text-slate-500">Kelola informasi pelanggan, tambahkan akun admin/user baru, edit profil, top-up saldo, atau hapus pengguna.</p>
+          <p className="text-sm font-medium text-slate-500">Kelola informasi pelanggan, tambahkan akun admin/user baru, edit profil, atau hapus pengguna.</p>
         </div>
         <button
           onClick={handleOpenAdd}
@@ -266,7 +224,7 @@ const Users = () => {
         </div>
       ) : (
         <Table 
-          headers={['ID User', 'Nama Lengkap', 'Alamat Email', 'Role Akses', 'Saldo Dompet', 'Tanggal Terdaftar', 'Aksi']}
+          headers={['ID User', 'Nama Lengkap', 'Alamat Email', 'Role Akses', 'Tanggal Terdaftar', 'Aksi']}
           emptyMessage="Tidak ada pengguna yang cocok dengan pencarian Anda."
         >
           {filteredUsers.map((user) => (
@@ -283,24 +241,9 @@ const Users = () => {
                   {user.role === 'admin' ? 'Administrator' : 'Mobile User'}
                 </span>
               </td>
-              <td className="px-6 py-4 font-black text-slate-800 text-sm">
-                {user.role === 'admin' ? '-' : formatRupiah(user.balance)}
-              </td>
               <td className="px-6 py-4 text-slate-500 text-xs">{formatDate(user.createdAt)}</td>
               <td className="px-6 py-4">
                 <div className="flex items-center gap-2">
-                  {/* Top Up button only for user role */}
-                  {user.role !== 'admin' && (
-                    <button
-                      onClick={() => handleOpenTopUp(user)}
-                      className="flex items-center gap-1 px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-500 text-emerald-600 hover:text-white border border-emerald-200 hover:border-emerald-500 font-bold text-xs rounded-lg transition-all"
-                      title="Isi Saldo"
-                    >
-                      <Coins className="h-3.5 w-3.5" />
-                      Top Up
-                    </button>
-                  )}
-                  
                   {/* Edit button */}
                   <button
                     onClick={() => handleOpenEdit(user)}
@@ -329,74 +272,6 @@ const Users = () => {
             </tr>
           ))}
         </Table>
-      )}
-
-      {/* --- MODAL 1: TOP UP SALDO --- */}
-      {showTopUpModal && selectedUser && (
-        <div className="fixed inset-0 bg-slate-950/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-md w-full overflow-hidden transform transition-all animate-scaleUp">
-            <div className="px-6 py-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
-              <h3 className="text-base font-black text-slate-800 flex items-center gap-2">
-                <Coins className="h-5 w-5 text-emerald-500 fill-current" />
-                Isi Saldo Pelanggan
-              </h3>
-              <button onClick={() => setShowTopUpModal(false)} className="text-slate-400 hover:text-slate-600 p-1.5 hover:bg-slate-100 rounded-lg transition">
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleTopUpSubmit} className="p-6 space-y-4">
-              {successMsg ? (
-                <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-emerald-700 flex flex-col items-center justify-center text-center py-6 space-y-2">
-                  <div className="bg-emerald-500 text-white p-2.5 rounded-full shadow-lg shadow-emerald-500/20"><Check className="h-6 w-6 stroke-[3]" /></div>
-                  <h4 className="font-extrabold text-slate-800 text-base">Top Up Sukses!</h4>
-                  <p className="text-xs font-semibold text-slate-500">{successMsg}</p>
-                </div>
-              ) : (
-                <>
-                  {errorMsg && (
-                    <div className="bg-rose-50 border border-rose-200 p-3 rounded-xl text-rose-600 flex items-center gap-2 text-xs font-bold">
-                      <AlertTriangle className="h-4 w-4 shrink-0" /> {errorMsg}
-                    </div>
-                  )}
-
-                  <div className="bg-slate-50 p-4 border rounded-xl space-y-1">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Informasi Pengguna</span>
-                    <h4 className="font-extrabold text-slate-800 text-sm">{selectedUser.name}</h4>
-                    <p className="text-xs font-semibold text-slate-500">{selectedUser.email}</p>
-                    <p className="text-xs font-bold text-slate-700 pt-1">
-                      Saldo Sekarang: <span className="text-emerald-600 font-extrabold">{formatRupiah(selectedUser.balance)}</span>
-                    </p>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider">Nominal Top Up (Rupiah)</label>
-                    <div className="relative">
-                      <span className="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400 font-black text-sm">Rp</span>
-                      <input
-                        type="number"
-                        min="5000"
-                        step="5000"
-                        required
-                        placeholder="Contoh: 50000"
-                        value={topUpAmount}
-                        onChange={(e) => setTopUpAmount(e.target.value)}
-                        className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-250 rounded-xl text-slate-800 font-extrabold text-sm focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/10"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="flex gap-3 pt-3">
-                    <button type="button" onClick={() => setShowTopUpModal(false)} className="flex-1 py-2.5 border border-slate-200 hover:bg-slate-50 font-bold text-sm text-slate-600 rounded-xl transition">Batal</button>
-                    <button type="submit" disabled={isSubmitting || !topUpAmount} className="flex-1 py-2.5 bg-emerald-500 hover:bg-emerald-600 font-bold text-sm text-white rounded-xl shadow-lg disabled:opacity-50 transition flex items-center justify-center gap-1.5">
-                      {isSubmitting ? <Loader className="h-4 w-4 animate-spin" /> : <><Check className="h-4 w-4 stroke-[3]" />Kirim Saldo</>}
-                    </button>
-                  </div>
-                </>
-              )}
-            </form>
-          </div>
-        </div>
       )}
 
       {/* --- MODAL 2: TAMBAH & EDIT USER --- */}
@@ -478,32 +353,17 @@ const Users = () => {
                     </div>
                   </div>
 
-                  {/* Input Role & Initial Balance */}
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1.5">
-                      <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider">Role Akses</label>
-                      <select
-                        value={formData.role}
-                        onChange={(e) => setFormData({...formData, role: e.target.value})}
-                        className="w-full px-4 py-2 bg-slate-50 border border-slate-250 rounded-xl text-slate-800 font-bold text-sm focus:outline-none"
-                      >
-                        <option value="user">Mobile User</option>
-                        <option value="admin">Administrator</option>
-                      </select>
-                    </div>
-
-                    {formData.role === 'user' && (
-                      <div className="space-y-1.5">
-                        <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider">Saldo Awal (Rp)</label>
-                        <input
-                          type="number"
-                          value={formData.balance}
-                          onChange={(e) => setFormData({...formData, balance: e.target.value})}
-                          placeholder="0"
-                          className="w-full px-4 py-2 bg-slate-50 border border-slate-250 rounded-xl text-slate-800 font-bold text-sm focus:outline-none"
-                        />
-                      </div>
-                    )}
+                  {/* Input Role */}
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider">Role Akses</label>
+                    <select
+                      value={formData.role}
+                      onChange={(e) => setFormData({...formData, role: e.target.value})}
+                      className="w-full px-4 py-2 bg-slate-50 border border-slate-250 rounded-xl text-slate-800 font-bold text-sm focus:outline-none"
+                    >
+                      <option value="user">Mobile User</option>
+                      <option value="admin">Administrator</option>
+                    </select>
                   </div>
 
                   <div className="flex gap-3 pt-4 border-t border-slate-100">

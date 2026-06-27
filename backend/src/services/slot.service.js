@@ -12,49 +12,39 @@ const emptySlot = (slot) => ({
   batteryId: null,
   status: 'empty',
   chargeLevel: 0,
-  cableName: null,
-  connectorType: null,
-  powerWatt: null,
-  pricePerKwh: null
+  batteryName: null,
+  batteryType: null
 });
 
 const statusToSlotStatus = (status) => {
   switch (status) {
-    case 'ready':
-      return 'ready';
-    case 'charging':
-      return 'charging';
-    case 'in-use':
-      return 'in-use';
-    case 'faulty':
-      return 'faulty';
-    case 'idle':
-      return 'idle';
-    default:
-      return 'ready';
+    case 'ready': return 'ready';
+    case 'charging': return 'charging';
+    case 'in-use': return 'in-use';
+    case 'faulty': return 'faulty';
+    case 'idle': return 'idle';
+    default: return 'ready';
   }
 };
 
-const buildPlacedSlot = (slot, cable, status = null) => ({
+const buildPlacedSlot = (slot, battery, status = null) => ({
   ...slot,
-  batteryId: cable.id,
-  status: statusToSlotStatus(status || cable.status || 'ready'),
-  chargeLevel: cable.chargeLevel || 100,
-  cableName: cable.name || cable.id,
-  connectorType: cable.type || null,
-  powerWatt: cable.powerWatt || null,
-  pricePerKwh: cable.pricePerKwh || null
+  batteryId: battery.id,
+  status: statusToSlotStatus(status || battery.status || 'ready'),
+  chargeLevel: battery.chargeLevel || 100,
+  batteryName: battery.name || battery.id,
+  batteryType: battery.type || null
 });
 
-const findCableSlotInStation = (station, cableId) => {
+const findBatterySlotInStation = (station, batteryId) => {
   const slots = cloneSlots(station?.slots);
-  const index = slots.findIndex((slot) => slot.batteryId === cableId);
+  const index = slots.findIndex((slot) => slot.batteryId === batteryId);
   if (index === -1) return { slots, index: -1, slot: null };
   return { slots, index, slot: slots[index] };
 };
 
-const removeCableFromStationSlots = async (cableId, options = {}) => {
-  if (!cableId) return;
+const removeBatteryFromStationSlots = async (batteryId, options = {}) => {
+  if (!batteryId) return;
 
   const stations = await Station.findAll(options.transaction ? { transaction: options.transaction } : undefined);
 
@@ -63,7 +53,7 @@ const removeCableFromStationSlots = async (cableId, options = {}) => {
     let changed = false;
 
     const updatedSlots = slots.map((slot) => {
-      if (slot.batteryId === cableId) {
+      if (slot.batteryId === batteryId) {
         changed = true;
         return emptySlot(slot);
       }
@@ -77,26 +67,26 @@ const removeCableFromStationSlots = async (cableId, options = {}) => {
   }
 };
 
-const getFirstAvailableSlotId = (station, cableId = null) => {
+const getFirstAvailableSlotId = (station, batteryId = null) => {
   const slots = cloneSlots(station?.slots);
-  const sameCableSlot = slots.find((slot) => cableId && slot.batteryId === cableId);
-  if (sameCableSlot) return sameCableSlot.slotId;
+  const sameBatterySlot = slots.find((slot) => batteryId && slot.batteryId === batteryId);
+  if (sameBatterySlot) return sameBatterySlot.slotId;
 
   const empty = slots.find((slot) => !slot.batteryId || slot.status === 'empty');
   return empty?.slotId || null;
 };
 
-const placeCableInStationSlot = async ({ cable, stationId, slotId = null, status = null, transaction = null }) => {
-  if (!cable?.id) {
-    return { error: 'Cable data is required', statusCode: 400 };
+const placeBatteryInStationSlot = async ({ battery, stationId, slotId = null, status = null, transaction = null }) => {
+  if (!battery?.id) {
+    return { error: 'Battery data is required', statusCode: 400 };
   }
 
-  await removeCableFromStationSlots(cable.id, { transaction });
+  await removeBatteryFromStationSlots(battery.id, { transaction });
 
   if (!stationId) {
-    cable.currentStationId = null;
-    cable.slotId = null;
-    await cable.save(transaction ? { transaction } : undefined);
+    battery.currentStationId = null;
+    battery.slotId = null;
+    await battery.save(transaction ? { transaction } : undefined);
     return { station: null, slotId: null };
   }
 
@@ -110,7 +100,7 @@ const placeCableInStationSlot = async ({ cable, stationId, slotId = null, status
     return { error: `Station ${stationId} does not have any slot configured`, statusCode: 400 };
   }
 
-  const desiredSlotId = toInteger(slotId) || getFirstAvailableSlotId(station, cable.id);
+  const desiredSlotId = toInteger(slotId) || getFirstAvailableSlotId(station, battery.id);
   if (!desiredSlotId) {
     return { error: `Tidak ada slot kosong pada stasiun ${stationId}`, statusCode: 409 };
   }
@@ -121,32 +111,32 @@ const placeCableInStationSlot = async ({ cable, stationId, slotId = null, status
   }
 
   const targetSlot = slots[slotIndex];
-  if (targetSlot.batteryId && targetSlot.batteryId !== cable.id) {
-    return { error: `Slot ${desiredSlotId} sudah ditempati oleh kabel ${targetSlot.batteryId}`, statusCode: 409 };
+  if (targetSlot.batteryId && targetSlot.batteryId !== battery.id) {
+    return { error: `Slot ${desiredSlotId} sudah ditempati oleh baterai ${targetSlot.batteryId}`, statusCode: 409 };
   }
 
-  slots[slotIndex] = buildPlacedSlot(targetSlot, cable, status);
+  slots[slotIndex] = buildPlacedSlot(targetSlot, battery, status);
   station.slots = slots;
   await station.save(transaction ? { transaction } : undefined);
 
-  cable.currentStationId = stationId;
-  cable.slotId = desiredSlotId;
-  if (status) cable.status = status;
-  await cable.save(transaction ? { transaction } : undefined);
+  battery.currentStationId = stationId;
+  battery.slotId = desiredSlotId;
+  if (status) battery.status = status;
+  await battery.save(transaction ? { transaction } : undefined);
 
   return { station, slotId: desiredSlotId };
 };
 
-const updateCableSlotStatus = async ({ cable, status = null, transaction = null }) => {
-  if (!cable?.id || !cable.currentStationId) return null;
+const updateBatterySlotStatus = async ({ battery, status = null, transaction = null }) => {
+  if (!battery?.id || !battery.currentStationId) return null;
 
-  const station = await Station.findByPk(cable.currentStationId, transaction ? { transaction } : undefined);
+  const station = await Station.findByPk(battery.currentStationId, transaction ? { transaction } : undefined);
   if (!station) return null;
 
-  const { slots, index } = findCableSlotInStation(station, cable.id);
+  const { slots, index } = findBatterySlotInStation(station, battery.id);
   if (index === -1) return null;
 
-  slots[index] = buildPlacedSlot(slots[index], cable, status || cable.status);
+  slots[index] = buildPlacedSlot(slots[index], battery, status || battery.status);
   station.slots = slots;
   await station.save(transaction ? { transaction } : undefined);
 
@@ -156,7 +146,7 @@ const updateCableSlotStatus = async ({ cable, status = null, transaction = null 
 module.exports = {
   emptySlot,
   getFirstAvailableSlotId,
-  placeCableInStationSlot,
-  removeCableFromStationSlots,
-  updateCableSlotStatus
+  placeBatteryInStationSlot,
+  removeBatteryFromStationSlots,
+  updateBatterySlotStatus
 };

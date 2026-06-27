@@ -1,7 +1,6 @@
 const Station = require('../models/station.model');
 const Battery = require('../models/battery.model');
 const Transaction = require('../models/transaction.model');
-const ChargingSession = require('../models/charging.model');
 const { sendSuccess, sendError } = require('../utils/response');
 
 const VALID_STATION_STATUSES = ['active', 'maintenance', 'inactive'];
@@ -139,14 +138,13 @@ const deleteStation = async (req, res, next) => {
       return sendError(res, 'Stasiun memiliki riwayat transaksi legacy. Ubah status menjadi inactive jika tidak digunakan.', 409);
     }
 
-    const activeChargingCount = await ChargingSession.count({ where: { stationId: id, status: 'charging' } });
-    if (activeChargingCount > 0) {
-      return sendError(res, 'Stasiun masih memiliki sesi charging aktif.', 409);
+    const pendingOrderCount = await Transaction.count({ where: { stationId: id, status: 'pending' } });
+    if (pendingOrderCount > 0) {
+      return sendError(res, 'Stasiun masih memiliki pesanan swap pending.', 409);
     }
 
-    // Detach registered charging cable points from this station first.
+    // Detach batteries from this station first.
     await Battery.update({ currentStationId: null, status: 'idle' }, { where: { currentStationId: id } });
-    await ChargingSession.update({ stationId: null }, { where: { stationId: id } });
 
     await station.destroy();
 

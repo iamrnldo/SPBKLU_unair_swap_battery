@@ -25,7 +25,8 @@ try {
 
   const requiredPermissions = [
     'android.permission.INTERNET',
-    'android.permission.CAMERA'
+    'android.permission.ACCESS_FINE_LOCATION',
+    'android.permission.ACCESS_COARSE_LOCATION'
   ];
 
   requiredPermissions.forEach((permission) => {

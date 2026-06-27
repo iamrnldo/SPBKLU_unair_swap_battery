@@ -6,7 +6,6 @@ import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Users from './pages/Users';
 import Stations from './pages/Stations';
-import ChargerMap from './pages/ChargerMap';
 import Batteries from './pages/Batteries';
 import Transactions from './pages/Transactions';
 import Settings from './pages/Settings';
@@ -24,7 +23,6 @@ const App = () => {
             <Route index element={<Dashboard />} />
             <Route path="users" element={<Users />} />
             <Route path="stations" element={<Stations />} />
-            <Route path="map" element={<ChargerMap />} />
             <Route path="batteries" element={<Batteries />} />
             <Route path="transactions" element={<Transactions />} />
             <Route path="settings" element={<Settings />} />

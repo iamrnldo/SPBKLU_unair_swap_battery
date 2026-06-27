@@ -1,16 +1,10 @@
 const { DataTypes } = require('sequelize');
 const { sequelize } = require('../config/db');
 
-/**
- * Historically this table was named `batteries` because the first flow was
- * battery swapping. In the charging flow requested for SPBKLU, each record is
- * now treated as a registered charging cable / connector point that can be
- * placed on the admin map and encoded into a QR code for mobile users to scan.
- */
 const Battery = sequelize.define('Battery', {
   id: {
     type: DataTypes.STRING,
-    primaryKey: true, // e.g. 'CBL-001' / legacy 'BT-101'
+    primaryKey: true,
     allowNull: false
   },
   name: {
@@ -19,7 +13,7 @@ const Battery = sequelize.define('Battery', {
   },
   type: {
     type: DataTypes.STRING,
-    allowNull: false // e.g. 'Type 2 AC', 'CCS2 DC', legacy '60V/20Ah'
+    allowNull: false
   },
   chargeLevel: {
     type: DataTypes.INTEGER,
@@ -33,12 +27,12 @@ const Battery = sequelize.define('Battery', {
   },
   powerWatt: {
     type: DataTypes.INTEGER,
-    defaultValue: 2200,
+    defaultValue: 0,
     allowNull: false
   },
   pricePerKwh: {
     type: DataTypes.INTEGER,
-    defaultValue: 2500,
+    defaultValue: 0,
     allowNull: false
   },
   slotId: {
@@ -56,11 +50,6 @@ const Battery = sequelize.define('Battery', {
   locationNote: {
     type: DataTypes.TEXT,
     allowNull: true
-  },
-  qrToken: {
-    type: DataTypes.STRING,
-    allowNull: true,
-    unique: true
   },
   currentStationId: {
     type: DataTypes.STRING,

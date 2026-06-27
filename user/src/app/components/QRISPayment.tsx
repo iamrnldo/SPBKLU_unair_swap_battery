@@ -1,4 +1,4 @@
-import { X, CheckCircle, Clock, Wallet } from 'lucide-react';
+import { X, CheckCircle, Clock, QrCode } from 'lucide-react';
 import { useState, useEffect } from 'react';
 
 interface QRISPaymentProps {
@@ -136,7 +136,7 @@ export default function QRISPayment({
               <div className="grid grid-cols-4 gap-2">
                 {['GoPay', 'OVO', 'DANA', 'ShopeePay'].map((app) => (
                   <div key={app} className="p-3 bg-muted rounded-lg text-center">
-                    <Wallet className="w-6 h-6 mx-auto mb-1 text-muted-foreground" />
+                    <QrCode className="w-6 h-6 mx-auto mb-1 text-muted-foreground" />
                     <p className="text-xs">{app}</p>
                   </div>
                 ))}

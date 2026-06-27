@@ -4,8 +4,7 @@ import {
   LayoutDashboard, 
   Users, 
   MapPin, 
-  Cable,
-  QrCode,
+  Battery,
   History, 
   Settings, 
   LogOut,
@@ -20,8 +19,7 @@ const Sidebar = () => {
     { name: 'Dashboard', path: '/', icon: LayoutDashboard },
     { name: 'Manajemen User', path: '/users', icon: Users },
     { name: 'Stasiun SPBKLU', path: '/stations', icon: MapPin },
-    { name: 'Peta QR Charger', path: '/map', icon: QrCode },
-    { name: 'Kabel Charger', path: '/batteries', icon: Cable },
+    { name: 'Database Baterai', path: '/batteries', icon: Battery },
     { name: 'Laporan Transaksi', path: '/transactions', icon: History },
     { name: 'Pengaturan Sistem', path: '/settings', icon: Settings }
   ];

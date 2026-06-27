@@ -29,7 +29,7 @@ api.interceptors.response.use(
     if (error.response && (error.response.status === 401 || error.response.status === 403)) {
       localStorage.removeItem('spbklu_user_token');
       localStorage.removeItem('spbklu_user_data');
-      localStorage.removeItem('spbklu_active_charging_session');
+      localStorage.removeItem('spbklu_active_swap_order');
       if (window.location.pathname !== '/login') {
         window.location.href = '/login';
       }

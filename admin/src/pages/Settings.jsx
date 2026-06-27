@@ -87,7 +87,7 @@ const SettingsPage = () => {
                     className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-250 rounded-xl text-slate-800 font-extrabold text-sm focus:outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/10"
                   />
                 </div>
-                <span className="text-[10px] text-slate-400 font-semibold block">Tarif ini akan ditarik dari saldo pelanggan (Mobile APK) setiap kali penukaran berhasil divalidasi stasiun.</span>
+                <span className="text-[10px] text-slate-400 font-semibold block">Tarif ini digunakan sebagai nominal QRIS saat pelanggan membuat pesanan swap baterai dari aplikasi mobile.</span>
               </div>
             </div>
 

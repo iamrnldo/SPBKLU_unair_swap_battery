@@ -1,38 +1,104 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, useMemo } from 'react';
 import api from '../services/api';
 import { useAuth } from '../hooks/useAuth';
 import Header from '../components/Header';
-import { MapPin, Battery, RefreshCw, Zap, Navigation, BatteryCharging } from 'lucide-react';
+import { MapPin, Battery, RefreshCw, Zap, Navigation } from 'lucide-react';
+
+const toNumber = (value) => {
+  if (value === null || value === undefined || value === '') return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const hasValidCoordinate = (station) => {
+  const lat = toNumber(station.latitude);
+  const lng = toNumber(station.longitude);
+  if (lat === null || lng === null) return false;
+  // 0,0 biasanya berarti koordinat belum diisi, bukan lokasi stasiun sebenarnya.
+  if (Math.abs(lat) < 0.000001 && Math.abs(lng) < 0.000001) return false;
+  return true;
+};
+
+const getStationLatLng = (station) => {
+  if (!hasValidCoordinate(station)) return null;
+  return {
+    lat: toNumber(station.latitude),
+    lng: toNumber(station.longitude)
+  };
+};
+
+const getDistanceKm = (from, to) => {
+  if (!from || !to) return null;
+
+  const earthRadiusKm = 6371;
+  const degToRad = (deg) => deg * (Math.PI / 180);
+  const dLat = degToRad(to.lat - from.lat);
+  const dLng = degToRad(to.lng - from.lng);
+  const lat1 = degToRad(from.lat);
+  const lat2 = degToRad(to.lat);
+
+  const a = Math.sin(dLat / 2) ** 2
+    + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return earthRadiusKm * c;
+};
+
+const formatDistance = (distanceKm) => {
+  if (distanceKm === null || distanceKm === undefined) return null;
+  if (distanceKm < 1) return `${Math.round(distanceKm * 1000)} m`;
+  return `${distanceKm.toFixed(1)} km`;
+};
+
+const getDeviceLocation = () => new Promise((resolve) => {
+  if (!navigator.geolocation) {
+    resolve(null);
+    return;
+  }
+
+  navigator.geolocation.getCurrentPosition(
+    (position) => {
+      resolve({
+        lat: position.coords.latitude,
+        lng: position.coords.longitude
+      });
+    },
+    () => resolve(null),
+    {
+      enableHighAccuracy: true,
+      timeout: 9000,
+      maximumAge: 120000
+    }
+  );
+});
 
 const Home = () => {
   const { user, refreshProfile } = useAuth();
-  const navigate = useNavigate();
   const [stations, setStations] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [locationLoading, setLocationLoading] = useState(false);
+  const [userLocation, setUserLocation] = useState(null);
   const [activeBattery, setActiveBattery] = useState(null);
-  const [activeCharging, setActiveCharging] = useState(null);
 
   const fetchHomeData = async () => {
     try {
-      // 1. Fetch stations list
-      const stationsRes = await api.get('/stations');
-      setStations(stationsRes.data.data);
+      setLocationLoading(true);
 
-      // 2. Refresh user profile (for latest wallet balance)
+      const [stationsRes, deviceLocation] = await Promise.all([
+        api.get('/stations'),
+        getDeviceLocation()
+      ]);
+
+      const stationList = stationsRes.data.data || [];
+      setStations(stationList);
+      setUserLocation(deviceLocation);
+
       await refreshProfile();
 
-      // 3. Restore active charging session if user closed/minimized app while charging
-      const chargingRes = await api.get('/charging/active');
-      setActiveCharging(chargingRes.data.data || null);
-
-      // 4. Legacy battery endpoint kept for old demo data
       const batteryRes = await api.get('/users/my-battery');
       setActiveBattery(batteryRes.data.data || null);
     } catch (error) {
       console.error('Failed to load home dashboard data:', error);
-      // Fallback fallback simulated battery if route restricted or for demo reliability
       if (user?.id === 2) {
         setActiveBattery({
           id: 'BT-901',
@@ -45,11 +111,13 @@ const Home = () => {
     } finally {
       setLoading(false);
       setRefreshing(false);
+      setLocationLoading(false);
     }
   };
 
   useEffect(() => {
     fetchHomeData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleRefresh = () => {
@@ -57,49 +125,61 @@ const Home = () => {
     fetchHomeData();
   };
 
+  const stationList = useMemo(() => {
+    const mapped = stations.map((station) => {
+      const stationLatLng = getStationLatLng(station);
+      const distanceKm = userLocation && stationLatLng ? getDistanceKm(userLocation, stationLatLng) : null;
+      return { ...station, stationLatLng, distanceKm };
+    });
+
+    return mapped.sort((a, b) => {
+      // Prioritaskan stasiun aktif.
+      if (a.status === 'active' && b.status !== 'active') return -1;
+      if (a.status !== 'active' && b.status === 'active') return 1;
+
+      // Jika lokasi perangkat tersedia, urutkan berdasarkan jarak.
+      if (a.distanceKm !== null && b.distanceKm !== null) return a.distanceKm - b.distanceKm;
+      if (a.distanceKm !== null) return -1;
+      if (b.distanceKm !== null) return 1;
+
+      return String(a.name || '').localeCompare(String(b.name || ''));
+    });
+  }, [stations, userLocation]);
+
   const getAvailableFullCount = (slots) => {
     if (!slots) return 0;
-    return slots.filter(s => s.status === 'ready' && s.chargeLevel >= 80).length;
+    return slots.filter((s) => s.status === 'ready' && s.chargeLevel >= 80).length;
+  };
+
+  const getStationDestination = (station) => {
+    const latLng = getStationLatLng(station);
+    if (latLng) return `${latLng.lat},${latLng.lng}`;
+    return station.address || station.name || '';
+  };
+
+  const openGoogleMapsRoute = (station) => {
+    const destination = getStationDestination(station);
+    if (!destination) {
+      alert('Koordinat atau alamat stasiun belum tersedia.');
+      return;
+    }
+
+    const url = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(destination)}&travelmode=driving`;
+    const opened = window.open(url, '_blank', 'noopener,noreferrer');
+    if (!opened) {
+      window.location.href = url;
+    }
   };
 
   return (
     <div className="bg-slate-50 min-h-screen pb-10">
-      {/* Dynamic Header with wallet card widget */}
       <Header />
 
       <main className="px-5 py-6 space-y-6">
-        {activeCharging?.session?.status === 'charging' && (
-          <section className="bg-blue-50 border border-blue-100 rounded-2xl p-5 shadow-sm space-y-4">
-            <div className="flex items-start gap-3">
-              <div className="bg-blue-500 text-white p-2.5 rounded-xl shadow-sm">
-                <BatteryCharging className="h-5 w-5" />
-              </div>
-              <div className="flex-1">
-                <span className="text-[10px] font-black uppercase tracking-wider text-blue-500">Sesi Charging Aktif</span>
-                <h3 className="font-black text-slate-800 text-sm mt-0.5">{activeCharging.session.cableName}</h3>
-                <p className="text-xs text-slate-500 font-semibold mt-1">
-                  Anda masih memiliki sesi charging yang belum diselesaikan. Buka halaman scan untuk menekan tombol Selesai Mengisi.
-                </p>
-              </div>
-            </div>
-            <div className="bg-white/70 border border-blue-100 rounded-xl p-3 text-xs font-semibold text-slate-600 space-y-1.5">
-              <div className="flex justify-between"><span>ID Sesi</span><span className="font-black text-slate-800">#{activeCharging.session.sessionId}</span></div>
-              <div className="flex justify-between"><span>Energi</span><span className="font-black text-blue-600">{(Number(activeCharging.session.estimatedKwh || 0)).toFixed(2)} kWh</span></div>
-            </div>
-            <button
-              onClick={() => navigate('/swap-qr')}
-              className="w-full py-3 bg-blue-500 hover:bg-blue-600 text-white font-black text-sm rounded-xl transition shadow-lg shadow-blue-500/10"
-            >
-              Lanjutkan / Selesaikan Charging
-            </button>
-          </section>
-        )}
-
-        {/* SECTION 1: Active Battery Status */}
         <section className="space-y-2.5">
           <div className="flex items-center justify-between">
             <h3 className="text-xs font-black text-slate-400 uppercase tracking-wider">Status Baterai Anda</h3>
-            <button 
+            <button
               onClick={handleRefresh}
               disabled={refreshing}
               className="text-emerald-500 text-xs font-extrabold flex items-center gap-1"
@@ -129,7 +209,6 @@ const Home = () => {
                 </div>
               </div>
 
-              {/* Progress Level bar */}
               <div className="space-y-2">
                 <div className="flex justify-between items-end">
                   <span className="text-[10px] font-bold text-slate-400">STATE OF CHARGE (SOC)</span>
@@ -138,14 +217,14 @@ const Home = () => {
                   </span>
                 </div>
                 <div className="w-full bg-slate-800 h-2.5 rounded-full overflow-hidden border border-slate-750">
-                  <div 
-                    className={`h-full ${activeBattery.chargeLevel <= 25 ? 'bg-rose-500' : 'bg-emerald-500'}`} 
+                  <div
+                    className={`h-full ${activeBattery.chargeLevel <= 25 ? 'bg-rose-500' : 'bg-emerald-500'}`}
                     style={{ width: `${activeBattery.chargeLevel}%` }}
                   ></div>
                 </div>
                 {activeBattery.chargeLevel <= 25 && (
                   <span className="text-[9px] text-rose-400 font-bold block pt-1 animate-pulse">
-                    ⚠️ Saldo baterai lemah! Segera tukarkan di stasiun terdekat.
+                    ⚠️ Daya baterai lemah! Segera tukarkan di stasiun terdekat.
                   </span>
                 )}
               </div>
@@ -169,18 +248,26 @@ const Home = () => {
               <div>
                 <h4 className="font-extrabold text-slate-800 text-sm">Tidak Ada Baterai Aktif</h4>
                 <p className="text-xs font-semibold text-slate-400 max-w-xs mx-auto mt-0.5">
-                  Anda belum menyewa atau memindai baterai SPBKLU aktif apa pun. Pergi ke stasiun terdekat untuk memulai penyewaan.
+                  Anda belum membawa baterai aktif SPBKLU. Pilih stasiun terdekat untuk memesan swap baterai.
                 </p>
               </div>
             </div>
           )}
         </section>
 
-        {/* SECTION 2: Near SPBKLU Swap Stations */}
         <section className="space-y-3">
-          <div>
-            <h3 className="text-xs font-black text-slate-400 uppercase tracking-wider">Stasiun Terdekat ({stations.length})</h3>
-            <p className="text-[10px] font-semibold text-slate-400">Cari stasiun yang memiliki baterai penuh siap pakai.</p>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h3 className="text-xs font-black text-slate-400 uppercase tracking-wider">Stasiun Terdekat ({stationList.length})</h3>
+              <p className="text-[10px] font-semibold text-slate-400">
+                {userLocation ? 'Diurutkan berdasarkan jarak dari lokasi Anda.' : 'Aktifkan izin lokasi agar urutan stasiun lebih akurat.'}
+              </p>
+            </div>
+            {locationLoading && (
+              <span className="text-[10px] font-black text-emerald-600 bg-emerald-50 border border-emerald-100 px-2 py-1 rounded-lg">
+                Mencari GPS...
+              </span>
+            )}
           </div>
 
           {loading ? (
@@ -188,51 +275,77 @@ const Home = () => {
               <div className="h-6 w-6 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
               <span className="mt-3 text-xs text-slate-400 font-bold">Mencari Stasiun Terdekat...</span>
             </div>
-          ) : (
+          ) : stationList.length > 0 ? (
             <div className="space-y-4">
-              {stations.map((station) => {
+              {stationList.map((station) => {
                 const fullCount = getAvailableFullCount(station.slots);
+                const distanceLabel = formatDistance(station.distanceKm);
+                const coordinateLabel = station.stationLatLng
+                  ? `${station.stationLatLng.lat.toFixed(5)}, ${station.stationLatLng.lng.toFixed(5)}`
+                  : 'Koordinat belum tersedia';
+
                 return (
-                  <div key={station.id} className="bg-white border rounded-2xl p-4.5 shadow-sm flex flex-col justify-between hover:border-slate-350 transition-colors">
+                  <div key={station.id} className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm space-y-4 hover:border-emerald-200 transition-colors">
                     <div className="flex items-start justify-between gap-4">
-                      <div className="space-y-1">
+                      <div className="space-y-1 flex-1 min-w-0">
                         <div className="flex items-center gap-1 text-slate-400">
-                          <MapPin className="h-3.5 w-3.5 text-rose-500 fill-current" />
-                          <span className="text-[10px] font-bold uppercase tracking-wide">ID: {station.id}</span>
+                          <MapPin className="h-3.5 w-3.5 text-rose-500 fill-current shrink-0" />
+                          <span className="text-[10px] font-bold uppercase tracking-wide truncate">ID: {station.id}</span>
                         </div>
                         <h4 className="text-sm font-black text-slate-800 tracking-tight">{station.name}</h4>
-                        <p className="text-xs text-slate-500 font-semibold line-clamp-1">{station.address}</p>
+                        <p className="text-xs text-slate-500 font-semibold leading-relaxed line-clamp-2">{station.address}</p>
+                        <p className="text-[10px] text-slate-400 font-bold">{coordinateLabel}</p>
                       </div>
 
-                      <div className="text-right shrink-0">
+                      <div className="text-right shrink-0 space-y-1">
                         <span className={`inline-flex px-2 py-0.5 rounded-full text-[9px] font-black uppercase ${
-                          station.status === 'active' 
-                            ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' 
+                          station.status === 'active'
+                            ? 'bg-emerald-50 text-emerald-600 border border-emerald-100'
                             : 'bg-orange-50 text-orange-600 border border-orange-100'
                         }`}>
                           {station.status === 'active' ? 'Online' : 'Offline'}
                         </span>
+                        {distanceLabel && (
+                          <span className="block text-[10px] font-black text-slate-700 bg-slate-50 border border-slate-100 px-2 py-1 rounded-lg">
+                            {distanceLabel}
+                          </span>
+                        )}
                       </div>
                     </div>
 
-                    <div className="border-t border-slate-100 mt-4 pt-3 flex items-center justify-between">
-                      <div className="flex items-center gap-1">
-                        <Zap className="h-4 w-4 text-emerald-500 fill-current" />
-                        <span className="text-xs font-black text-slate-700">{fullCount} Baterai Siap</span>
-                        <span className="text-[10px] text-slate-400 font-bold">/ {station.slots?.length || 0} Slot</span>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-3">
+                        <span className="text-[9px] font-black text-emerald-600 uppercase block">Baterai Siap</span>
+                        <div className="flex items-end gap-1 mt-0.5">
+                          <span className="text-xl font-black text-emerald-700">{fullCount}</span>
+                          <span className="text-[10px] text-emerald-600 font-bold pb-0.5">unit</span>
+                        </div>
                       </div>
-
-                      <button 
-                        onClick={() => alert(`Membuka peta navigasi GPS ke: ${station.name}`)}
-                        className="flex items-center gap-1 text-[10px] font-extrabold text-emerald-600 bg-emerald-50 px-2.5 py-1.5 rounded-xl border border-emerald-100"
-                      >
-                        <Navigation className="h-3 w-3" />
-                        Rute
-                      </button>
+                      <div className="bg-slate-50 border border-slate-200 rounded-xl p-3">
+                        <span className="text-[9px] font-black text-slate-400 uppercase block">Total Slot</span>
+                        <div className="flex items-end gap-1 mt-0.5">
+                          <span className="text-xl font-black text-slate-800">{station.slots?.length || 0}</span>
+                          <span className="text-[10px] text-slate-500 font-bold pb-0.5">slot</span>
+                        </div>
+                      </div>
                     </div>
+
+                    <button
+                      onClick={() => openGoogleMapsRoute(station)}
+                      className="w-full flex items-center justify-center gap-2 text-xs font-black text-white bg-emerald-500 hover:bg-emerald-600 px-3 py-3 rounded-xl shadow-lg shadow-emerald-500/10 active:scale-[0.99] transition"
+                    >
+                      <Navigation className="h-4 w-4" />
+                      Rute Google Maps
+                    </button>
                   </div>
                 );
               })}
+            </div>
+          ) : (
+            <div className="bg-white border rounded-2xl p-6 text-center text-slate-400 shadow-sm">
+              <MapPin className="h-8 w-8 mx-auto text-slate-300 mb-2" />
+              <h4 className="text-sm font-black text-slate-700">Belum Ada Stasiun</h4>
+              <p className="text-xs font-semibold mt-1">Data stasiun SPBKLU belum tersedia.</p>
             </div>
           )}
         </section>

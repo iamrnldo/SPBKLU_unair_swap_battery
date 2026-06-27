@@ -3,8 +3,6 @@ const User = require('../models/user.model');
 const Station = require('../models/station.model');
 const Battery = require('../models/battery.model');
 const Transaction = require('../models/transaction.model');
-const ChargingSession = require('../models/charging.model');
-const { Op } = require('sequelize');
 const { sendSuccess, sendError } = require('../utils/response');
 
 /**
@@ -16,14 +14,10 @@ const getDashboardStats = async (req, res, next) => {
     const totalUsers = await User.count({ where: { role: 'user' } });
     const totalStations = await Station.count();
     const totalBatteries = await Battery.count();
-    const totalSwapTransactions = await Transaction.count();
-    const totalChargingTransactions = await ChargingSession.count();
-    const totalTransactions = totalSwapTransactions + totalChargingTransactions;
+    const totalTransactions = await Transaction.count();
     
-    // Calculate total revenue from completed legacy swaps and QR charging sessions
-    const swapRevenue = await Transaction.sum('cost', { where: { status: 'completed' } }) || 0;
-    const chargingRevenue = await ChargingSession.sum('amount', { where: { status: { [Op.in]: ['charging', 'completed'] } } }) || 0;
-    const totalRevenue = swapRevenue + chargingRevenue;
+    // Calculate total revenue from completed swap orders
+    const totalRevenue = await Transaction.sum('cost', { where: { status: 'completed' } }) || 0;
 
     const operationalRate = "99.2%"; // KPI simulation
 
@@ -52,40 +46,10 @@ const getDashboardStats = async (req, res, next) => {
 const getAllUsers = async (req, res, next) => {
   try {
     const users = await User.findAll({
-      attributes: ['id', 'name', 'email', 'role', 'balance', 'createdAt']
+      attributes: ['id', 'name', 'email', 'role', 'createdAt']
     });
 
     return sendSuccess(res, 'Users list retrieved successfully', users);
-  } catch (error) {
-    next(error);
-  }
-};
-
-/**
- * Top up another user's balance directly (Admin only)
- */
-const topUpUser = async (req, res, next) => {
-  try {
-    const { id } = req.params;
-    const { amount } = req.body;
-
-    if (!amount || amount <= 0) {
-      return sendError(res, 'Invalid top-up amount', 400);
-    }
-
-    const user = await User.findByPk(id);
-    if (!user) {
-      return sendError(res, 'User not found', 404);
-    }
-
-    user.balance += parseInt(amount);
-    await user.save();
-
-    return sendSuccess(res, `Berhasil mengisi saldo untuk ${user.name}`, {
-      userId: user.id,
-      name: user.name,
-      newBalance: user.balance
-    });
   } catch (error) {
     next(error);
   }
@@ -96,7 +60,7 @@ const topUpUser = async (req, res, next) => {
  */
 const createUser = async (req, res, next) => {
   try {
-    const { name, email, password, role, balance } = req.body;
+    const { name, email, password, role } = req.body;
 
     if (!name || !email || !password || !role) {
       return sendError(res, 'Name, email, password, and role are required', 400);
@@ -115,16 +79,14 @@ const createUser = async (req, res, next) => {
       name,
       email,
       password: hashedPassword,
-      role,
-      balance: role === 'admin' ? 0 : (parseInt(balance) || 0)
+      role
     });
 
     return sendSuccess(res, 'User created successfully', {
       id: newUser.id,
       name: newUser.name,
       email: newUser.email,
-      role: newUser.role,
-      balance: newUser.balance
+      role: newUser.role
     }, 201);
   } catch (error) {
     next(error);
@@ -137,7 +99,7 @@ const createUser = async (req, res, next) => {
 const updateUser = async (req, res, next) => {
   try {
     const { id } = req.params;
-    const { name, email, password, role, balance } = req.body;
+    const { name, email, password, role } = req.body;
 
     const user = await User.findByPk(id);
     if (!user) {
@@ -155,7 +117,6 @@ const updateUser = async (req, res, next) => {
 
     if (name) user.name = name;
     if (role) user.role = role;
-    if (balance !== undefined) user.balance = role === 'admin' ? 0 : parseInt(balance);
 
     if (password && password.trim() !== '') {
       const salt = await bcrypt.genSalt(10);
@@ -168,8 +129,7 @@ const updateUser = async (req, res, next) => {
       id: user.id,
       name: user.name,
       email: user.email,
-      role: user.role,
-      balance: user.balance
+      role: user.role
     });
   } catch (error) {
     next(error);
@@ -207,7 +167,6 @@ const deleteUser = async (req, res, next) => {
 module.exports = {
   getDashboardStats,
   getAllUsers,
-  topUpUser,
   createUser,
   updateUser,
   deleteUser

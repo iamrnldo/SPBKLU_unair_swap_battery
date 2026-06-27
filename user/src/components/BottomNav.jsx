@@ -1,6 +1,6 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
-import { Home, Scan, History, User } from 'lucide-react';
+import { Home, ArrowDownUp, History, User } from 'lucide-react';
 
 const BottomNav = () => {
   return (
@@ -27,7 +27,7 @@ const BottomNav = () => {
           }`
         }
       >
-        <Scan className="h-6 w-6 stroke-[3]" />
+        <ArrowDownUp className="h-6 w-6 stroke-[3]" />
       </NavLink>
 
       {/* History Transactions Link */}
